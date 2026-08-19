@@ -15,6 +15,15 @@
  * so a reload restores the visited page; the back/forward stack only tracks
  * address-bar navigations (in-frame link clicks are cross-origin and
  * invisible — a documented limitation).
+ *
+ * Embed-refusal handling (X-Frame-Options / frame-ancestors): the host
+ * probe detects blocked sites before the iframe loads, and the client shows
+ * a card with two honest actions — "open in browser" (the reliable path)
+ * or "try loading directly" (usually still blocked by the browser). The
+ * user's choice is remembered per domain (localStorage) so subsequent
+ * visits auto-apply: remembered "external" shows a compact bar with a
+ * one-click "open now"; remembered "anyway" loads the iframe directly with
+ * a thin "change choice" bar.
  */
 import { useEffect, useState } from 'react'
 import {
@@ -30,6 +39,7 @@ import { embeddabilityOf, normalizeBrowserUrl } from './browser.ts'
 import { patchTab } from './state.ts'
 import { SandboxStatusBar } from './SandboxStatusBar.tsx'
 import { t } from './locales.ts'
+import { getEmbedPref, setEmbedPref, clearEmbedPref, hostnameOf, type EmbedPref } from './embed-pref.ts'
 import type { TabComponentProps } from './service.ts'
 import css from './sidebar.module.css'
 
@@ -62,21 +72,33 @@ export function BrowserView(props: TabComponentProps) {
   const noSandbox = store.getPrefs().browserNoSandbox === true || localUnlock
   /** A site that refuses to be embedded (X-Frame-Options / frame-ancestors):
    *  the probe verdict shown instead of the blank iframe. */
-  const [embedBlocked, setEmbedBlocked] = useState<string | null>(null)
+  const [blocked, setBlocked] = useState<string | null>(null)
   /** The user asked to load the refused site anyway (keeps the plain iframe). */
   const [forceEmbed, setForceEmbed] = useState(false)
+  /** The remembered per-domain choice (from localStorage). */
+  const [remembered, setRemembered] = useState<EmbedPref | null>(null)
+  /** The user clicked "change" on a remembered bar, dismissing it for this
+   *  navigation (shows the full card again). */
+  const [dismissed, setDismissed] = useState(false)
 
   // Probe every navigation (address bar, history, restored path): when the
-  // target forbids embedding, show the reason + open-in-browser instead of
-  // the browser's cryptic "refused to connect" blank frame. A failed probe
-  // (unreachable) keeps the plain iframe.
+  // target forbids embedding, apply the remembered choice or show the card.
+  // A failed probe (unreachable) keeps the plain iframe.
   useEffect(() => {
     if (url === undefined) return
     let cancelled = false
-    setEmbedBlocked(null)
+    setBlocked(null)
     setForceEmbed(false)
+    setDismissed(false)
+    const host = hostnameOf(url)
+    const pref = host !== '' ? getEmbedPref(host) : null
+    setRemembered(pref)
     void api.browserProbe(url).then((probe) => {
-      if (!cancelled && embeddabilityOf(probe) === 'blocked') setEmbedBlocked(url)
+      if (!cancelled && embeddabilityOf(probe) === 'blocked') {
+        setBlocked(url)
+        // Auto-apply remembered choice.
+        if (pref === 'anyway') setForceEmbed(true)
+      }
     }).catch(() => { /* unreachable: keep the plain iframe */ })
     return () => { cancelled = true }
   }, [url])
@@ -124,6 +146,46 @@ export function BrowserView(props: TabComponentProps) {
     setInput(next)
     setReloadKey(key => key + 1)
   }
+
+  const openExternal = (remember: boolean): void => {
+    if (url !== undefined) window.open(url, '_blank', 'noopener')
+    if (remember && url !== undefined) {
+      const host = hostnameOf(url)
+      if (host !== '') {
+        setEmbedPref(host, 'external')
+        setRemembered('external')
+      }
+    }
+  }
+
+  const loadAnyway = (remember: boolean): void => {
+    if (remember && url !== undefined) {
+      const host = hostnameOf(url)
+      if (host !== '') {
+        setEmbedPref(host, 'anyway')
+        setRemembered('anyway')
+      }
+    }
+    setForceEmbed(true)
+  }
+
+  const changeChoice = (): void => {
+    if (url !== undefined) {
+      const host = hostnameOf(url)
+      if (host !== '') clearEmbedPref(host)
+    }
+    setRemembered(null)
+    setForceEmbed(false)
+    setDismissed(true)
+  }
+
+  // Render mode selection.
+  const mode = url === undefined ? 'start'
+    : blocked !== null && !dismissed
+      ? (remembered === 'external' ? 'external-bar'
+         : remembered === 'anyway' || forceEmbed ? 'frame-forced'
+         : 'card')
+      : 'frame'
 
   return (
     <div className={css.browser}>
@@ -197,25 +259,70 @@ export function BrowserView(props: TabComponentProps) {
         onUnlock={() => { setLocalUnlock(true) }}
         onRestore={() => { setLocalUnlock(false) }}
       />
-      {url === undefined ? (
+      {mode === 'start' ? (
         <div className={css.browserStart}>{t('browserStart')}</div>
-      ) : embedBlocked !== null && !forceEmbed ? (
+      ) : mode === 'external-bar' ? (
+        <BrowserRememberedExternal
+          url={url!}
+          onOpenNow={() => { window.open(url!, '_blank', 'noopener') }}
+          onChange={changeChoice}
+        />
+      ) : mode === 'card' ? (
         <BrowserEmbedBlocked
-          url={embedBlocked}
-          onOpenInBrowser={() => { window.open(embedBlocked, '_blank', 'noopener') }}
-          onLoadAnyway={() => { setForceEmbed(true) }}
+          url={blocked!}
+          onOpenInBrowser={() => { openExternal(false) }}
+          onOpenInBrowserAndRemember={() => { openExternal(true) }}
+          onLoadAnyway={() => { loadAnyway(false) }}
+          onLoadAnywayAndRemember={() => { loadAnyway(true) }}
         />
       ) : (
-        <iframe
-          key={`${reloadKey}:${noSandbox ? 'ns' : 'sb'}`}
-          className={css.browserFrame}
-          src={url}
-          sandbox={noSandbox ? undefined : BROWSER_IFRAME_SANDBOX}
-          referrerPolicy="no-referrer"
-          allow=""
-          title={url}
-        />
+        <>
+          {blocked !== null && (
+            <div className={css.browserForcedBar}>
+              <span>{t('browserForcedBanner')}</span>
+              <button type="button" className={css.browserForcedButton} onClick={changeChoice}>
+                {t('browserChangeChoice')}
+              </button>
+            </div>
+          )}
+          <iframe
+            key={`${reloadKey}:${noSandbox ? 'ns' : 'sb'}`}
+            className={css.browserFrame}
+            src={url}
+            sandbox={noSandbox ? undefined : BROWSER_IFRAME_SANDBOX}
+            referrerPolicy="no-referrer"
+            allow=""
+            title={url}
+          />
+        </>
       )}
+    </div>
+  )
+}
+
+/**
+ * The compact bar shown when the user has remembered "open in browser" for
+ * this domain. One-click "open now" plus a "change" link to revert to the
+ * full card.
+ */
+export function BrowserRememberedExternal(props: {
+  url: string
+  onOpenNow: () => void
+  onChange: () => void
+}) {
+  const { url, onOpenNow, onChange } = props
+  let host = url
+  try { host = new URL(url).hostname } catch { /* keep the raw URL */ }
+  return (
+    <div className={css.browserRememberBar}>
+      <IconRightUpOutline16 size={14} />
+      <span>{t('browserRememberedExternal', { host })}</span>
+      <button type="button" className={css.browserRememberButton} onClick={onOpenNow}>
+        {t('browserOpenNow')}
+      </button>
+      <button type="button" className={css.browserRememberChange} onClick={onChange}>
+        {t('browserChangeChoice')}
+      </button>
     </div>
   )
 }
@@ -224,15 +331,20 @@ export function BrowserView(props: TabComponentProps) {
  * The embed-refusal panel: shown when the probed site forbids being
  * displayed inside other pages (X-Frame-Options / frame-ancestors) — the
  * iframe would only show the browser's "refused to connect" blank. Explains
- * the reason and offers the real-browser open plus a load-anyway escape.
+ * the reason and offers the real-browser open plus an honest "try loading
+ * directly" escape (usually still blocked). The user's choice is remembered
+ * per domain when the checkbox is checked.
  * Exported so the copy and the actions are testable without a DOM.
  */
 export function BrowserEmbedBlocked(props: {
   url: string
   onOpenInBrowser: () => void
+  onOpenInBrowserAndRemember: () => void
   onLoadAnyway: () => void
+  onLoadAnywayAndRemember: () => void
 }) {
-  const { url, onOpenInBrowser, onLoadAnyway } = props
+  const { url, onOpenInBrowser, onOpenInBrowserAndRemember, onLoadAnyway, onLoadAnywayAndRemember } = props
+  const [remember, setRemember] = useState(false)
   let host = url
   try { host = new URL(url).hostname } catch { /* keep the raw URL */ }
   return (
@@ -241,13 +353,29 @@ export function BrowserEmbedBlocked(props: {
       <div className={css.browserBlockedTitle}>{t('browserEmbedBlocked', { host })}</div>
       <div className={css.browserBlockedDesc}>{t('browserEmbedBlockedDesc')}</div>
       <div className={css.browserBlockedActions}>
-        <button type="button" className={css.browserBlockedButton} onClick={onOpenInBrowser}>
+        <button
+          type="button"
+          className={css.browserBlockedButtonPrimary}
+          onClick={remember ? onOpenInBrowserAndRemember : onOpenInBrowser}
+        >
           {t('browserOpenExternal')}
         </button>
-        <button type="button" className={css.browserBlockedButton} onClick={onLoadAnyway}>
+        <button
+          type="button"
+          className={css.browserBlockedButton}
+          onClick={remember ? onLoadAnywayAndRemember : onLoadAnyway}
+        >
           {t('browserEmbedAnyway')}
         </button>
       </div>
+      <label className={css.browserRememberCheckbox}>
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={event => { setRemember(event.target.checked) }}
+        />
+        <span>{t('browserRememberChoice')}</span>
+      </label>
     </div>
   )
 }

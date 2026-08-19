@@ -1214,6 +1214,108 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* Primary action on the embed-refusal card (open in browser). */
+.browserBlockedButtonPrimary {
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxxs-strong-11);
+  cursor: pointer;
+}
+
+.browserBlockedButtonPrimary:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Checkbox row on the embed-refusal card (remember choice). */
+.browserRememberCheckbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font: var(--dsw-font-xxxs-11);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.browserRememberCheckbox input {
+  cursor: pointer;
+}
+
+/* Compact bar shown when "open in browser" is remembered for this domain. */
+.browserRememberBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.browserRememberButton {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 5px;
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxxs-11);
+  cursor: pointer;
+}
+
+.browserRememberButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.browserRememberChange {
+  padding: 3px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.browserRememberChange:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Thin bar shown above the iframe when loading directly despite refusal. */
+.browserForcedBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+  font: var(--dsw-font-xxxs-11);
+}
+
+.browserForcedButton {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+  cursor: pointer;
+}
+
+.browserForcedButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
 .editorCm {
   flex: 1;
   min-height: 0;

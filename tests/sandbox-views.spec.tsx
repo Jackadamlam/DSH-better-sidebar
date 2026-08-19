@@ -173,15 +173,18 @@ describe('browser tab iframe sandbox', () => {
 })
 
 describe('browser embed-refusal panel', () => {
-  it('explains the refusal with the host, the reason, and both actions', () => {
+  it('explains the refusal with the host, the reason, both actions, and the remember checkbox', () => {
     const html = renderToString(createElement(BrowserEmbedBlocked, {
       url: 'https://arxiv.org/abs/2401.10001',
       onOpenInBrowser: () => {},
+      onOpenInBrowserAndRemember: () => {},
       onLoadAnyway: () => {},
+      onLoadAnywayAndRemember: () => {},
     }))
     expect(html).toContain('arxiv.org 拒绝了嵌入请求')
     expect(html).toContain('X-Frame-Options / frame-ancestors')
     expect(html).toContain('在浏览器中打开')
-    expect(html).toContain('仍然加载')
+    expect(html).toContain('尝试直接加载')
+    expect(html).toContain('记住对此域名的选择')
   })
 })
