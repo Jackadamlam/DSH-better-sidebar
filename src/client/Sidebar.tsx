@@ -55,6 +55,22 @@ import css from './sidebar.module.css'
  * (mirror of the terminal view's own cap; the loop restarts on session switch). */
 const FAILURE_LIMIT = 3
 
+/**
+ * Detect a frameless desktop shell (Electron) that draws its native caption
+ * (minimize / maximize / close) over the web content's top-right corner —
+ * exactly where the sidebar's toggle cluster sits. There the collapse button
+ * is hidden under the caption, so position-compat must default ON to drop the
+ * cluster below the strip. A normal browser (no "Electron" in the UA) keeps
+ * the user's `titleBarCompat` pref untouched.
+ */
+function isFramelessShell(): boolean {
+  try {
+    return typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent)
+  } catch {
+    return false
+  }
+}
+
 /** Render the content of one tab (dispatched by type). */
 function TabContent(props: {
   tab: SidebarTab
@@ -177,7 +193,10 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
   // snapshot's prefs, so flipping the setting re-renders and re-applies
   // immediately; the cleanup removes both on unmount/boundary swap so a
   // crashed sidebar never leaves them behind.
-  const titleBarCompat = snapshot.prefs.titleBarCompat
+  // Frameless desktop shells (Electron) hide the top-right toggle cluster
+  // under the native caption, so auto-enable compat there; browsers follow
+  // the user's pref.
+  const titleBarCompat = snapshot.prefs.titleBarCompat || isFramelessShell()
   const titleBarStrip = snapshot.prefs.titleBarStripPx
   useEffect(() => {
     const root = document.documentElement
