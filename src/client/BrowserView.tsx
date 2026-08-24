@@ -31,6 +31,7 @@ import {
   IconChevronRightOutline14,
   IconLinkOutline14,
   IconRefreshOutline14,
+  IconRightUpOutline16,
   IconWarningOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { VscLinkExternal } from 'react-icons/vsc'
