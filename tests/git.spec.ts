@@ -1,8 +1,42 @@
+import { execFile, execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { parseUnifiedDiff } from '../src/client/DiffView.tsx'
-import { parseLogLines, parsePorcelainZ } from '../src/git.ts'
+import { parseLogLines, parsePorcelainZ, repoRoots, status } from '../src/git.ts'
+
+const execFileAsync = promisify(execFile)
+const normalizePath = (path: string): string => path.replaceAll('\\', '/')
+// macOS tmpdir() is the /var symlink while git reports the resolved
+// /private/var prefix — canonicalize both sides before comparing.
+const canonical = (path: string): string => normalizePath(realpathSync(path))
 
 describe('git parsing', () => {
+  it('discovers and selects direct child repositories under a workspace directory', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'dsh-better-sidebar-git-'))
+    const first = join(workspace, 'first-repo')
+    const second = join(workspace, 'second-repo')
+    try {
+      await Promise.all([mkdir(first), mkdir(second)])
+      await Promise.all([
+        execFileAsync('git', ['-C', first, 'init']),
+        execFileAsync('git', ['-C', second, 'init']),
+      ])
+
+      await expect(repoRoots(workspace)).resolves.toEqual([canonical(first), canonical(second)])
+      await expect(status(workspace, canonical(second))).resolves.toMatchObject({
+        isRepo: true,
+        root: canonical(second),
+        repositories: [canonical(first), canonical(second)],
+      })
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   it('parses porcelain -z entries including renames', () => {
     const output = ['M  src/a.ts', ' M src/b.ts', '?? src/c.ts', 'R  src/new.ts', 'src/old.ts', ''].join('\0')
     const entries = parsePorcelainZ(output)
@@ -12,6 +46,36 @@ describe('git parsing', () => {
       { path: 'src/c.ts', xy: '??' },
       { path: 'src/new.ts', xy: 'R ' },
     ])
+  })
+
+  it('keeps untracked files inside new directories as individual rows (status --untracked-files=all)', () => {
+    // status() runs with --untracked-files=all, so a new folder must surface
+    // as one entry PER FILE (?? newdir/a.ts), never a collapsed ?? newdir/
+    // row that has no diff and cannot be read (regression: new folders showed
+    // as a single folder row whose diff tab failed with "is a directory").
+    const output = ['?? newdir/a.ts', '?? newdir/sub/b.ts', ''].join('\0')
+    expect(parsePorcelainZ(output)).toEqual([
+      { path: 'newdir/a.ts', xy: '??' },
+      { path: 'newdir/sub/b.ts', xy: '??' },
+    ])
+  })
+
+  it('keeps untracked files inside new directories as individual rows (real git)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-git-status-'))
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root })
+      execFileSync('git', ['config', 'user.email', 't@t'], { cwd: root })
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: root })
+      execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], { cwd: root })
+      mkdirSync(join(root, 'newdir'))
+      writeFileSync(join(root, 'newdir', 'a.ts'), 'x')
+      const result = await status(root)
+      const paths = result.entries.map(entry => entry.path)
+      expect(paths).toContain('newdir/a.ts')
+      expect(paths.some(path => path.endsWith('/'))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('parses log rows with unit separators (full hash + refs)', () => {

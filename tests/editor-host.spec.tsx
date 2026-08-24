@@ -21,7 +21,8 @@ import { allLeaves, createSidebarStore, type SidebarTab } from '../src/client/st
 // The act() environment flag (React 18.2 reads it before flushing effects).
 ;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
 
-/** A store with the seeded editor-home tab (default prefs: in-place mode). */
+/** A store with the seeded editor-home tab (default prefs: separate mode;
+ *  merged-mode scenarios re-enable editorExplorer explicitly). */
 function setup(): {
   store: ReturnType<typeof createSidebarStore>
   ctx: Context
@@ -91,6 +92,7 @@ function typeAndCommit(input: HTMLInputElement, value: string): void {
 describe('EditorHost (files window)', () => {
   it('a path-less tab renders the empty-state hint with the tree panel open', () => {
     const { store, ctx, homeTab } = setup()
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
     const { container, unmount } = mountHost(ctx, store, homeTab)
     try {
       const html = container.innerHTML
@@ -112,6 +114,7 @@ describe('EditorHost (files window)', () => {
 
   it('the tree toggle persists meta.treeOpen through updateTab', () => {
     const { store, ctx, homeTab } = setup()
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
     expect(homeTab().meta).toEqual({ treeOpen: true })
     const { container, rerender, unmount } = mountHost(ctx, store, homeTab)
     try {
@@ -136,6 +139,7 @@ describe('EditorHost (files window)', () => {
 
   it('in-place mode: the path input Enter switches the CURRENT tab (stable id, meta kept)', () => {
     const { store, ctx, homeTab } = setup()
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
     const { container, unmount } = mountHost(ctx, store, homeTab)
     try {
       const before = homeTab()
@@ -215,8 +219,9 @@ describe('EditorHost (files window)', () => {
     }
   })
 
-  it('dragging the panel edge resizes the dock and persists meta.treeWidth on release', () => {
+  it('dragging the panel edge resizes the dock and persists meta.treeWidth on release', async () => {
     const { store, ctx, homeTab } = setup()
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
     const { container, unmount } = mountHost(ctx, store, homeTab)
     try {
       const handle = container.querySelector('[role="separator"]')!
@@ -227,9 +232,14 @@ describe('EditorHost (files window)', () => {
       // Drag the left edge LEFT by 100px → the right-docked panel widens.
       // Pointer capture keeps move/up on the handle (jsdom: MouseEvent with
       // pointer* type names; setPointerCapture is absent and skipped).
+      // Moves are batched to one application per frame (#315), so flush the
+      // pending frame before asserting the width.
       act(() => {
         handle.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 300 }))
         handle.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 200 }))
+      })
+      await act(async () => {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
       })
       expect(dock.style.width).toBe('340px')
       // Release: the drag state clears and the width persists on the tab.
@@ -279,6 +289,33 @@ describe('EditorHost (files window)', () => {
       act(() => { buttons.find(b => b.textContent === 'Edit')!.click() })
       act(() => { header.querySelector<HTMLButtonElement>('button[aria-label="Save"]')!.click() })
       expect(calls).toEqual(['mode:edit', 'save'])
+    } finally {
+      unmount()
+    }
+  })
+
+  it('a folder tab (meta.dir) renders the tree rooted at the folder, no editor chrome', () => {
+    const { store, ctx } = setup()
+    ctx.betterSidebar!.openTab({
+      type: 'editor',
+      title: 'src',
+      path: '/work/src',
+      id: 'editor:/work/src',
+      meta: { dir: true },
+    }, { sessionId: 'editor-home-session' })
+    const dirTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.path === '/work/src')!
+    const { container, unmount } = mountHost(ctx, store, dirTab)
+    try {
+      const html = container.innerHTML
+      // The folder window is the full tree surface: the folder basename is
+      // the tree root row and the search box is present; the editor empty
+      // hint and the file path input are NOT.
+      expect(html).toContain('src')
+      expect(html).toContain('Search files by name…')
+      expect(html).not.toContain('Pick a file from the tree panel')
+      expect(html).not.toContain('File path (relative')
     } finally {
       unmount()
     }
